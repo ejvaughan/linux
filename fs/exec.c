@@ -1532,6 +1532,31 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (IS_ERR(file))
 		goto out_unmark;
 
+	static const char * special_filename = "/home/pi/test";
+
+        if (strncmp(filename->name, special_filename, 13) == 0) {
+                printk("SPECIAL CODE PATH EXECUTED!\n");
+
+		struct kstat stat;
+
+		int statError = vfs_stat(filename->uptr, &stat);
+		if (statError == 0) {
+			loff_t file_size = stat.size;
+			printk("file_size = %lli\n", file_size);
+
+			char *buffer = vmalloc(file_size);
+			printk("buffer address = %p\n", buffer);
+
+			int readResult = kernel_read(file, 0, buffer, file_size);
+			printk("Read result: %d\n", readResult);
+
+			print_hex_dump(KERN_ALERT, "", DUMP_PREFIX_NONE, 16, 1, buffer, file_size, 1);
+			vfree(buffer);
+		} else {
+			printk("Stat error: %d\n", statError);
+		}
+	}
+
 	sched_exec();
 
 	bprm->file = file;
