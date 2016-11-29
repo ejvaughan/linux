@@ -66,6 +66,8 @@
 
 #include <trace/events/sched.h>
 
+#include <keys/system_keyring.h>
+
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
@@ -1478,6 +1480,51 @@ static int exec_binprm(struct linux_binprm *bprm)
 	return ret;
 }
 
+#define SIGNATURE_MAGIC_STRING_LENGTH 22
+#define SIGNATURE_LENGTH_FIELD_SIZE 4
+static const char *signature_magic_string = "~~ BINARY SIGNATURE ~~";
+
+int has_signature(struct filename *filename, struct file *file, loff_t *out_file_size)
+{
+	struct kstat stat;
+	int stat_error;
+
+	if ((stat_error = vfs_stat(filename->uptr, &stat)) != 0) {
+		printk("Stat error %d", stat_error);
+		return -1;
+	}
+
+	loff_t file_size = stat.size;
+	printk("file_size = %lli\n", file_size);
+
+	if (out_file_size) {
+		*out_file_size = file_size;
+	}
+
+	// Check if the binary has a signature by looking for the presence of the magic string
+	if (file_size < SIGNATURE_MAGIC_STRING_LENGTH) {
+		printk("File size is less than magic string length!\n");
+		return 0;
+	}
+
+	loff_t signature_position = file_size - SIGNATURE_MAGIC_STRING_LENGTH;
+
+	// Read the bytes where the signature needs to be, if there is a signature
+	int signature_read;
+	unsigned char signature_bytes[SIGNATURE_MAGIC_STRING_LENGTH];
+	if ((signature_read = kernel_read(file, signature_position, signature_bytes, SIGNATURE_MAGIC_STRING_LENGTH)) <= 0) {
+		printk("Error reading signature bytes!\n");
+		return -1;
+	}
+
+	if (memcmp(signature_bytes, signature_magic_string, SIGNATURE_MAGIC_STRING_LENGTH) != 0) {
+		printk("No signature present!\n");
+		return 0;
+	}
+	
+	return 1;
+}
+
 /*
  * sys_execve() executes a new program.
  */
@@ -1533,68 +1580,53 @@ static int do_execveat_common(int fd, struct filename *filename,
 		goto out_unmark;
 
 	static const char *special_filename = "/home/pi/test";
-	static const char *signature_magic_string = "~~ BINARY SIGNATURE ~~";
-	#define SIGNATURE_MAGIC_STRING_LENGTH 22
-	#define SIGNATURE_LENGTH_FIELD_SIZE 4
-
+		
         if (strncmp(filename->name, special_filename, 13) == 0) {
                 printk("SPECIAL CODE PATH EXECUTED!\n");
 
-		struct kstat stat;
-		int stat_error;
-
-		if ((stat_error = vfs_stat(filename->uptr, &stat)) != 0) {
-			printk("Stat error %d", stat_error);
+		int has_a_signature;
+		loff_t file_size;
+		if ((has_a_signature = has_signature(filename, file, &file_size)) < 0) {
+			// Error encountered while checking for the presence of a signature
 			goto out_unmark;
+		}		
+
+		if (has_a_signature) {
+			loff_t buffer_size = file_size - SIGNATURE_MAGIC_STRING_LENGTH;	
+			char *buffer = vmalloc(buffer_size);
+			printk("buffer address = %p\n", buffer);
+
+			if (buffer == NULL) {
+				printk("Cannot allocate buffer large enough to verify signature\n");
+				goto out_unmark;
+			}
+
+			int read_result;
+			if ((read_result = kernel_read(file, 0, buffer, buffer_size)) <= 0) {
+				printk("Read binary data failed: %d\n", read_result);
+				vfree(buffer);
+				goto out_unmark;
+			}
+
+			unsigned int signature_length = le32_to_cpup((__u32 *)(buffer + buffer_size - SIGNATURE_LENGTH_FIELD_SIZE));
+			printk("signature_length = %d\n", signature_length);
+			
+			unsigned long long data_length = buffer_size - SIGNATURE_LENGTH_FIELD_SIZE - signature_length;
+			char *signature_data = buffer + data_length;
+					
+			// Verify signature
+			print_hex_dump(KERN_ALERT, "", DUMP_PREFIX_NONE, 16, 1, signature_data, signature_length, 1);
+
+			if (system_verify_data(buffer, data_length, signature_data, signature_length, VERIFYING_UNSPECIFIED_SIGNATURE) != 0) {
+	                	// OH SNAP: SIGNATURE VERIFICATION FAILED
+				vfree(buffer);
+	                	goto out_unmark;
+		        }
+
+			printk("Signature verified!\n");
+
+			vfree(buffer);
 		}
-
-		loff_t file_size = stat.size;
-		printk("file_size = %lli\n", file_size);
-
-		// Check if the binary has a signature by looking for the presence of the magic string
-		if (file_size < SIGNATURE_MAGIC_STRING_LENGTH) {
-			printk("File size is less than magic string length!\n");
-			goto out_unmark;
-		}
-
-		loff_t signature_position = file_size - SIGNATURE_MAGIC_STRING_LENGTH;
-
-		// Read the bytes where the signature needs to be, if there is a signature
-		int signature_read;
-		unsigned char signature_bytes[SIGNATURE_MAGIC_STRING_LENGTH];
-		if ((signature_read = kernel_read(file, signature_position, signature_bytes, SIGNATURE_MAGIC_STRING_LENGTH)) <= 0) {
-			printk("Error reading signature bytes!\n");
-			goto out_unmark;
-		}
-
-		if (memcmp(signature_bytes, signature_magic_string, SIGNATURE_MAGIC_STRING_LENGTH) != 0) {
-			printk("No signature present!\n");
-			goto out_unmark;
-		}
-
-		// We have a signature
-		
-		loff_t buffer_size = file_size - SIGNATURE_MAGIC_STRING_LENGTH;	
-		char *buffer = vmalloc(buffer_size);
-		printk("buffer address = %p\n", buffer);
-
-		int read_result;
-		if ((read_result = kernel_read(file, 0, buffer, buffer_size)) <= 0) {
-			printk("Read binary data failed: %d\n", read_result);
-			goto out_unmark;
-		}
-
-		unsigned int signature_length = le32_to_cpup((__u32 *)(buffer + buffer_size - SIGNATURE_LENGTH_FIELD_SIZE));
-		printk("signature_length = %d\n", signature_length);
-		
-		unsigned long long data_length = buffer_size - SIGNATURE_LENGTH_FIELD_SIZE - signature_length;
-		char *signature_data = buffer + data_length;
-				
-		// Verify signature
-		
-		print_hex_dump(KERN_ALERT, "", DUMP_PREFIX_NONE, 16, 1, signature_data, signature_length, 1);
-
-		vfree(buffer);
 	}
 
 	sched_exec();
