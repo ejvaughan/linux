@@ -1484,6 +1484,12 @@ static int exec_binprm(struct linux_binprm *bprm)
 #define SIGNATURE_LENGTH_FIELD_SIZE 4
 static const char *signature_magic_string = "~~ BINARY SIGNATURE ~~";
 
+/*
+ * Checks a binary for the presence of a digital signature.
+ *
+ * On success, returns 1 if a signature is present, or 0 if a signature is not present.
+ * On error, returns -1
+ */
 int has_signature(struct filename *filename, struct file *file, loff_t *out_file_size)
 {
 	struct kstat stat;
@@ -1523,6 +1529,60 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 	}
 	
 	return 1;
+}
+
+/*
+ * Verifies a binary's digital signature. If the signature is valid, returns 0. Otherwise, returns -1
+ */
+int verify_binary_signature(struct file *file, loff_t file_size)
+{
+	loff_t buffer_size = file_size - SIGNATURE_MAGIC_STRING_LENGTH;	
+			
+	// Sanity check
+	if (buffer_size < SIGNATURE_LENGTH_FIELD_SIZE) {
+		return -1;
+	}
+
+	char *buffer = vmalloc(buffer_size);
+	printk("buffer address = %p\n", buffer);
+
+	if (buffer == NULL) {
+		printk("Cannot allocate buffer large enough to verify signature\n");
+		return -1;
+	}
+
+	int read_result;
+	if ((read_result = kernel_read(file, 0, buffer, buffer_size)) <= 0) {
+		printk("Read binary data failed: %d\n", read_result);
+		vfree(buffer);
+		return -1;
+	}
+
+	unsigned int signature_length = le32_to_cpup((__u32 *)(buffer + buffer_size - SIGNATURE_LENGTH_FIELD_SIZE));
+	printk("signature_length = %d\n", signature_length);
+
+	// Sanity check
+	if (buffer_size - SIGNATURE_LENGTH_FIELD_SIZE < signature_length) {
+		return -1;
+	}
+	
+	unsigned long long data_length = buffer_size - SIGNATURE_LENGTH_FIELD_SIZE - signature_length;
+	char *signature_data = buffer + data_length;
+			
+	// Verify signature
+	print_hex_dump(KERN_ALERT, "", DUMP_PREFIX_NONE, 16, 1, signature_data, signature_length, 1);
+
+	if (system_verify_data(buffer, data_length, signature_data, signature_length, VERIFYING_UNSPECIFIED_SIGNATURE) != 0) {
+		// OH SNAP: SIGNATURE VERIFICATION FAILED
+		vfree(buffer);
+		return -1;
+	}
+
+	printk("Signature verified!\n");
+
+	vfree(buffer);
+
+	return 0;
 }
 
 /*
@@ -1591,41 +1651,9 @@ static int do_execveat_common(int fd, struct filename *filename,
 			goto out_unmark;
 		}		
 
-		if (has_a_signature) {
-			loff_t buffer_size = file_size - SIGNATURE_MAGIC_STRING_LENGTH;	
-			char *buffer = vmalloc(buffer_size);
-			printk("buffer address = %p\n", buffer);
-
-			if (buffer == NULL) {
-				printk("Cannot allocate buffer large enough to verify signature\n");
-				goto out_unmark;
-			}
-
-			int read_result;
-			if ((read_result = kernel_read(file, 0, buffer, buffer_size)) <= 0) {
-				printk("Read binary data failed: %d\n", read_result);
-				vfree(buffer);
-				goto out_unmark;
-			}
-
-			unsigned int signature_length = le32_to_cpup((__u32 *)(buffer + buffer_size - SIGNATURE_LENGTH_FIELD_SIZE));
-			printk("signature_length = %d\n", signature_length);
-			
-			unsigned long long data_length = buffer_size - SIGNATURE_LENGTH_FIELD_SIZE - signature_length;
-			char *signature_data = buffer + data_length;
-					
-			// Verify signature
-			print_hex_dump(KERN_ALERT, "", DUMP_PREFIX_NONE, 16, 1, signature_data, signature_length, 1);
-
-			if (system_verify_data(buffer, data_length, signature_data, signature_length, VERIFYING_UNSPECIFIED_SIGNATURE) != 0) {
-	                	// OH SNAP: SIGNATURE VERIFICATION FAILED
-				vfree(buffer);
-	                	goto out_unmark;
-		        }
-
-			printk("Signature verified!\n");
-
-			vfree(buffer);
+		if (has_a_signature && verify_binary_signature(file, file_size) != 0) {
+			// SIGNATURE VERIFICATION FAILED
+			goto out_unmark;
 		}
 	}
 
