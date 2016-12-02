@@ -1639,10 +1639,8 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (IS_ERR(file))
 		goto out_unmark;
 
-	static const char *special_filename = "/home/pi/test";
-		
-        if (strncmp(filename->name, special_filename, 13) == 0) {
-                printk("SPECIAL CODE PATH EXECUTED!\n");
+	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+		printk("SPECIAL CODE PATH EXECUTED!\n");
 
 		int has_a_signature;
 		loff_t file_size;
