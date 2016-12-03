@@ -1639,22 +1639,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (IS_ERR(file))
 		goto out_unmark;
 
-	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
-		printk("SPECIAL CODE PATH EXECUTED!\n");
-
-		int has_a_signature;
-		loff_t file_size;
-		if ((has_a_signature = has_signature(filename, file, &file_size)) < 0) {
-			// Error encountered while checking for the presence of a signature
-			goto out_unmark;
-		}		
-
-		if (has_a_signature && verify_binary_signature(file, file_size) != 0) {
-			// SIGNATURE VERIFICATION FAILED
-			goto out_unmark;
-		}
-	}
-
 	sched_exec();
 
 	bprm->file = file;
@@ -1680,6 +1664,22 @@ static int do_execveat_common(int fd, struct filename *filename,
 		bprm->filename = pathbuf;
 	}
 	bprm->interp = bprm->filename;
+
+	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+                 printk("SPECIAL CODE PATH EXECUTED!\n");
+         
+                 int has_a_signature;
+                 loff_t file_size;
+                 if ((has_a_signature = has_signature(filename, file, &file_size)) != 1) {
+                         // Error encountered while checking for the presence of a signature
+                         goto out_unmark;
+                 }               
+                         
+                 if (verify_binary_signature(file, file_size) != 0) {
+                         // SIGNATURE VERIFICATION FAILED
+                         goto out_unmark;    
+                 }
+         }	
 
 	retval = bprm_mm_init(bprm);
 	if (retval)
