@@ -1666,12 +1666,9 @@ static int do_execveat_common(int fd, struct filename *filename,
 	bprm->interp = bprm->filename;
 
 	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
-                 printk("SPECIAL CODE PATH EXECUTED!\n");
-         
-                 int has_a_signature;
                  loff_t file_size;
-                 if ((has_a_signature = has_signature(filename, file, &file_size)) != 1) {
-                         // Error encountered while checking for the presence of a signature
+                 if (has_signature(filename, file, &file_size) != 1) {
+                         // NO SIGNATURE
                          goto out_unmark;
                  }               
                          
