@@ -68,6 +68,9 @@
 
 #include <keys/system_keyring.h>
 
+int has_signature(struct filename *, struct file *, loff_t *);
+int verify_binary_signature(struct file *, loff_t);
+
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
@@ -125,6 +128,7 @@ SYSCALL_DEFINE1(uselib, const char __user *, library)
 		.intent = LOOKUP_OPEN,
 		.lookup_flags = LOOKUP_FOLLOW,
 	};
+	loff_t file_size;
 
 	if (IS_ERR(tmp))
 		goto out;
@@ -146,6 +150,25 @@ SYSCALL_DEFINE1(uselib, const char __user *, library)
 	fsnotify_open(file);
 
 	error = -ENOEXEC;
+
+	printk("Before our code\n");
+	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+                  printk("Checking %s for signature\n", tmp->name);
+ 
+                  if (has_signature(tmp, file, &file_size) != 1) {
+                          // NO SIGNATURE
+                          printk("No signature present for %s!\n", tmp->name);
+                          goto exit;
+                  }
+ 
+                  if (verify_binary_signature(file, file_size) != 0) {
+                          // SIGNATURE VERIFICATION FAILED
+                          printk("Signature verification failed for %s!\n", tmp->name);
+                          goto exit;
+                  }
+ 
+                 printk("Signature successfully verified for %s!\n", tmp->name);
+          }
 
 	read_lock(&binfmt_lock);
 	list_for_each_entry(fmt, &formats, lh) {
