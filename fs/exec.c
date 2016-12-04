@@ -1494,13 +1494,17 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 {
 	struct kstat stat;
 	int stat_error;
+	loff_t signature_position;
+	loff_t file_size;
+	int signature_read;
+	unsigned char signature_bytes[SIGNATURE_MAGIC_STRING_LENGTH];
 
 	if ((stat_error = vfs_stat(filename->uptr, &stat)) != 0) {
 		printk("Stat error %d", stat_error);
 		return -1;
 	}
 
-	loff_t file_size = stat.size;
+	file_size = stat.size;
 	if (out_file_size) {
 		*out_file_size = file_size;
 	}
@@ -1511,11 +1515,9 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 		return 0;
 	}
 
-	loff_t signature_position = file_size - SIGNATURE_MAGIC_STRING_LENGTH;
+	signature_position = file_size - SIGNATURE_MAGIC_STRING_LENGTH;
 
 	// Read the bytes where the signature needs to be, if there is a signature
-	int signature_read;
-	unsigned char signature_bytes[SIGNATURE_MAGIC_STRING_LENGTH];
 	if ((signature_read = kernel_read(file, signature_position, signature_bytes, SIGNATURE_MAGIC_STRING_LENGTH)) <= 0) {
 		printk("Error reading signature bytes!\n");
 		return -1;
@@ -1533,35 +1535,41 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
  */
 int verify_binary_signature(struct file *file, loff_t file_size)
 {
-	loff_t buffer_size = file_size - SIGNATURE_MAGIC_STRING_LENGTH;	
+	loff_t buffer_size;
+	char *buffer;
+	int read_result;
+	unsigned int signature_length;
+	unsigned long long data_length;
+	char *signature_data;
+
+	buffer_size = file_size - SIGNATURE_MAGIC_STRING_LENGTH;	
 			
 	// Sanity check
 	if (buffer_size < SIGNATURE_LENGTH_FIELD_SIZE) {
 		return -1;
 	}
 
-	char *buffer = vmalloc(buffer_size);
+	buffer = vmalloc(buffer_size);
 	if (buffer == NULL) {
 		printk("Cannot allocate buffer large enough to verify signature\n");
 		return -1;
 	}
 
-	int read_result;
 	if ((read_result = kernel_read(file, 0, buffer, buffer_size)) <= 0) {
 		printk("Read binary data failed: %d\n", read_result);
 		vfree(buffer);
 		return -1;
 	}
 
-	unsigned int signature_length = le32_to_cpup((__u32 *)(buffer + buffer_size - SIGNATURE_LENGTH_FIELD_SIZE));
+	signature_length = le32_to_cpup((__u32 *)(buffer + buffer_size - SIGNATURE_LENGTH_FIELD_SIZE));
 
 	// Sanity check
 	if (buffer_size - SIGNATURE_LENGTH_FIELD_SIZE < signature_length) {
 		return -1;
 	}
 	
-	unsigned long long data_length = buffer_size - SIGNATURE_LENGTH_FIELD_SIZE - signature_length;
-	char *signature_data = buffer + data_length;
+	data_length = buffer_size - SIGNATURE_LENGTH_FIELD_SIZE - signature_length;
+	signature_data = buffer + data_length;
 			
 	// Verify signature
 	if (system_verify_data(buffer, data_length, signature_data, signature_length, VERIFYING_UNSPECIFIED_SIGNATURE) != 0) {
@@ -1588,6 +1596,7 @@ static int do_execveat_common(int fd, struct filename *filename,
 	struct file *file;
 	struct files_struct *displaced;
 	int retval;
+	loff_t file_size;
 
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
@@ -1658,7 +1667,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
 		 printk("Checking %s for signature\n", filename->name);
 
-                 loff_t file_size;
                  if (has_signature(filename, file, &file_size) != 1) {
                          // NO SIGNATURE
                          printk("No signature present for %s!\n", filename->name);
