@@ -1522,12 +1522,10 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 	}
 
 	if (memcmp(signature_bytes, signature_magic_string, SIGNATURE_MAGIC_STRING_LENGTH) != 0) {
-		// No signature present
-		return 0;
+		return 0; // No signature present
 	}
 
-	// Signature present	
-	return 1;
+	return 1; // Signature present
 }
 
 /*
@@ -1543,8 +1541,6 @@ int verify_binary_signature(struct file *file, loff_t file_size)
 	}
 
 	char *buffer = vmalloc(buffer_size);
-	printk("buffer address = %p\n", buffer);
-
 	if (buffer == NULL) {
 		printk("Cannot allocate buffer large enough to verify signature\n");
 		return -1;
@@ -1665,17 +1661,17 @@ static int do_execveat_common(int fd, struct filename *filename,
                  loff_t file_size;
                  if (has_signature(filename, file, &file_size) != 1) {
                          // NO SIGNATURE
-                         printk("No signature present!\n");
+                         printk("No signature present for %s!\n", filename->name);
                          goto out_unmark;
                  }               
                          
                  if (verify_binary_signature(file, file_size) != 0) {
                          // SIGNATURE VERIFICATION FAILED
-                         printk("Signature verification failed!\n");
+                         printk("Signature verification failed for %s!\n", filename->name);
                          goto out_unmark;    
                  }
 
-		printk("Signature successfully verified!\n");		
+		printk("Signature successfully verified for %s!\n", filename->name);		
          }	
 
 	retval = bprm_mm_init(bprm);
