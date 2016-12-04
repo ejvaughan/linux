@@ -1501,8 +1501,6 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 	}
 
 	loff_t file_size = stat.size;
-	printk("file_size = %lli\n", file_size);
-
 	if (out_file_size) {
 		*out_file_size = file_size;
 	}
@@ -1524,10 +1522,11 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 	}
 
 	if (memcmp(signature_bytes, signature_magic_string, SIGNATURE_MAGIC_STRING_LENGTH) != 0) {
-		printk("No signature present!\n");
+		// No signature present
 		return 0;
 	}
-	
+
+	// Signature present	
 	return 1;
 }
 
@@ -1559,7 +1558,6 @@ int verify_binary_signature(struct file *file, loff_t file_size)
 	}
 
 	unsigned int signature_length = le32_to_cpup((__u32 *)(buffer + buffer_size - SIGNATURE_LENGTH_FIELD_SIZE));
-	printk("signature_length = %d\n", signature_length);
 
 	// Sanity check
 	if (buffer_size - SIGNATURE_LENGTH_FIELD_SIZE < signature_length) {
@@ -1570,15 +1568,11 @@ int verify_binary_signature(struct file *file, loff_t file_size)
 	char *signature_data = buffer + data_length;
 			
 	// Verify signature
-	print_hex_dump(KERN_ALERT, "", DUMP_PREFIX_NONE, 16, 1, signature_data, signature_length, 1);
-
 	if (system_verify_data(buffer, data_length, signature_data, signature_length, VERIFYING_UNSPECIFIED_SIGNATURE) != 0) {
 		// OH SNAP: SIGNATURE VERIFICATION FAILED
 		vfree(buffer);
 		return -1;
 	}
-
-	printk("Signature verified!\n");
 
 	vfree(buffer);
 
@@ -1666,16 +1660,22 @@ static int do_execveat_common(int fd, struct filename *filename,
 	bprm->interp = bprm->filename;
 
 	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+		 printk("Checking %s for signature\n", filename->name);
+
                  loff_t file_size;
                  if (has_signature(filename, file, &file_size) != 1) {
                          // NO SIGNATURE
+                         printk("No signature present!\n");
                          goto out_unmark;
                  }               
                          
                  if (verify_binary_signature(file, file_size) != 0) {
                          // SIGNATURE VERIFICATION FAILED
+                         printk("Signature verification failed!\n");
                          goto out_unmark;    
                  }
+
+		printk("Signature successfully verified!\n");		
          }	
 
 	retval = bprm_mm_init(bprm);
