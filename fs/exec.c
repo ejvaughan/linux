@@ -1485,6 +1485,20 @@ static int exec_binprm(struct linux_binprm *bprm)
 static const char *signature_magic_string = "~~ BINARY SIGNATURE ~~";
 
 /*
+ * Checks if a binary is a script
+ */
+int is_script(struct file *file)
+{
+	// Signed scripts are currently unsupported (punted to version 2)
+        unsigned char shebang[2];       
+	if (kernel_read(file, 0, shebang, sizeof(shebang)) != sizeof(shebang)) {
+		return 0;
+	}
+
+	return shebang[0] == '#' && shebang[1] == '!';
+}
+
+/*
  * Checks a binary for the presence of a digital signature.
  *
  * On success, returns 1 if a signature is present, or 0 if a signature is not present.
@@ -1509,7 +1523,7 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 		*out_file_size = file_size;
 	}
 
-	// Check if the binary has a signature by looking for the presence of the magic string
+	// Sanity check
 	if (file_size < SIGNATURE_MAGIC_STRING_LENGTH) {
 		printk("File size is less than magic string length!\n");
 		return 0;
@@ -1523,6 +1537,7 @@ int has_signature(struct filename *filename, struct file *file, loff_t *out_file
 		return -1;
 	}
 
+	// Check if the binary has a signature by looking for the presence of the magic string
 	if (memcmp(signature_bytes, signature_magic_string, SIGNATURE_MAGIC_STRING_LENGTH) != 0) {
 		return 0; // No signature present
 	}
@@ -1664,7 +1679,7 @@ static int do_execveat_common(int fd, struct filename *filename,
 	}
 	bprm->interp = bprm->filename;
 
-	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+	if (!uid_eq(current_euid(), GLOBAL_ROOT_UID) && !is_script(file)) {
 		 printk("Checking %s for signature\n", filename->name);
 
                  if (has_signature(filename, file, &file_size) != 1) {
