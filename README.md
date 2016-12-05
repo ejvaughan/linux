@@ -10,11 +10,31 @@ For example, the following command will generate a 4096-bit RSA public/private k
 
 ## Step 2. Build the kernel. ##
 
-The kernel must be built with the following two configuration options set:
+The kernel must be built with the following configuration:
 
-    CONFIG_SYSTEM_TRUSTED_KEYS="path/to/certificate.pem" # Specifies the certificate that will be included in the system keyring
+    -*- Cryptographic API  --->
 
-    CONFIG_MODULE_SIG=y # Brings in cryptographic APIs that are used by our modification
+        <*> RSA algorithm
+
+        -*- SHA1 digest algorithm
+        {*} SHA224 and SHA256 algorithm
+        <*> SHA384 and SHA512 digest algorithms
+
+        -*- Asymmetric (public-key cryptographic) key type  --->
+
+	    -*-   Asymmetric public-key crypto algorithm subtype
+	    -*-   RSA public-key algorithm
+	    -*-   X.509 certificate parser
+	    -*-     PKCS#7 message parser
+
+        Certificates for signature checking  --->
+
+	    -*- Provide system-wide ring of trusted keys
+	    (<filename of the certificate you generated in step 1>) Additional X.509 keys for default system keyring
+
+    [*] Enable loadable module support  --->
+
+        [*] Module signature verification
 
 ## Step 3. After installing the kernel, sign a binary with the signer.py script ##
 
@@ -37,9 +57,9 @@ Run your signed binary, and inspect the output of the system log via dmesg. You 
 	[ 4662.088726] RSA: <== RSA_verify_signature() = 0
 	[ 4662.088735] SIG: <==verify_signature() = 0
 	[ 4662.088745] PKCS7: <== pkcs7_validate_trust_one() = 0
-	[ 4662.088761] Signature verified!
+	[ 4662.088761] Signature successfully verified for ./test!
 
-The presence of the "Signature verified!" message indicates that the binary was successfully verified.
+The presence of the "Signature successfully verified" message indicates that the binary was successfully verified.
 
 If you subsequently modify the binary (changing its hash) and try to exec again, the binary will not run. Instead, you will see the following output in the system log:
 
